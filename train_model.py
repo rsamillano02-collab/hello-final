@@ -1,97 +1,167 @@
+
 import pandas as pd
 import joblib
-from ucimlrepo import fetch_ucirepo
+
 from sklearn.model_selection import train_test_split
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix
+)
 
-DATA_FILE = "student_data.csv"
-MODEL_FILE = "student_model.pkl"
+# ---------------------------------
+# FILE CONFIGURATION
+# ---------------------------------
+
+DATA_FILE = "wine_quality.csv"
+MODEL_FILE = "wine_model.pkl"
+
+DATA_URL = (
+    "https://archive.ics.uci.edu/ml/"
+    "machine-learning-databases/wine-quality/"
+    "winequality-red.csv"
+)
+
+
+# ---------------------------------
+# TRAIN AND SAVE MODEL
+# ---------------------------------
 
 def train_and_save():
-    print("Downloading UCI Student Performance dataset...")
-    student = fetch_ucirepo(id=320)
 
-    df = pd.concat(
-        [student.data.features, student.data.targets],
-        axis=1
-    )
+    print("Downloading UCI Wine Quality Dataset...")
 
-    # If the repository data identifies the course, keep Mathematics records.
-    course_col = next((c for c in df.columns if c.lower() in ("course", "subject")), None)
-    if course_col:
-        math_rows = df[course_col].astype(str).str.lower().isin(
-            ["math", "mat", "mathematics", "maths"]
-        )
-        if math_rows.any():
-            df = df.loc[math_rows].copy()
+    # Retrieve red wine dataset
+    df = pd.read_csv(DATA_URL, sep=";")
 
-    if "G3" not in df.columns:
-        raise ValueError("The downloaded dataset does not contain the required G3 target column.")
-
-    df = df.drop_duplicates().copy()
+    # Save dataset
     df.to_csv(DATA_FILE, index=False)
 
-    print("Rows and columns:", df.shape)
+    print("\nDataset Shape:", df.shape)
+    print("\nFirst 5 Records:")
     print(df.head())
-    print("\nData types:\n", df.dtypes)
-    print("\nMissing values:\n", df.isnull().sum())
 
-    # 1 = at risk (G3 < 10); 0 = not at risk
-    y = (df["G3"] < 10).astype(int)
+    print("\nData Types:")
+    print(df.dtypes)
 
-    # G3 must never be used as an input feature.
-    X = df.drop(columns=["G3"])
-    numeric_cols = X.select_dtypes(include="number").columns.tolist()
-    categorical_cols = X.select_dtypes(exclude="number").columns.tolist()
+    print("\nMissing Values:")
+    print(df.isnull().sum())
 
-    numeric_pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler())
-    ])
-    categorical_pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OneHotEncoder(handle_unknown="ignore"))
-    ])
+    print("\nDuplicate Rows:", df.duplicated().sum())
 
-    preprocessor = ColumnTransformer([
-        ("numeric", numeric_pipe, numeric_cols),
-        ("categorical", categorical_pipe, categorical_cols)
-    ])
+    # ---------------------------------
+    # DATA PREPROCESSING
+    # ---------------------------------
+
+    df = df.drop_duplicates().copy()
+
+    # Target:
+    # 1 = GOOD QUALITY
+    # 0 = NEEDS IMPROVEMENT
+
+    y = (df["quality"] >= 6).astype(int)
+
+    # Remove original quality column
+    # to prevent target leakage
+    X = df.drop(columns=["quality"])
+
+    print("\nTarget Distribution:")
+    print(y.value_counts())
+
+    # ---------------------------------
+    # TRAIN AND TEST SPLIT
+    # ---------------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=42, stratify=y
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y
     )
 
+    # ---------------------------------
+    # MACHINE LEARNING PIPELINE
+    # ---------------------------------
+
     model = Pipeline([
-        ("preprocessor", preprocessor),
-        ("classifier", RandomForestClassifier(
-            n_estimators=100,
-            random_state=42,
-            class_weight="balanced"
-        ))
+        (
+            "imputer",
+            SimpleImputer(strategy="median")
+        ),
+        (
+            "scaler",
+            StandardScaler()
+        ),
+        (
+            "classifier",
+            RandomForestClassifier(
+                n_estimators=150,
+                random_state=42,
+                class_weight="balanced"
+            )
+        )
     ])
 
+    # ---------------------------------
+    # MODEL TRAINING
+    # ---------------------------------
+
+    print("\nTraining Random Forest Model...")
+
     model.fit(X_train, y_train)
+
+    # ---------------------------------
+    # MODEL EVALUATION
+    # ---------------------------------
+
     predictions = model.predict(X_test)
 
-    accuracy = accuracy_score(y_test, predictions)
+    accuracy = accuracy_score(
+        y_test,
+        predictions
+    )
+
+    print("\nModel Accuracy:", round(accuracy, 3))
+
+    print("\nConfusion Matrix:")
+    print(confusion_matrix(y_test, predictions))
+
     report = classification_report(
-        y_test, predictions,
-        target_names=["Not at risk", "At risk"],
+        y_test,
+        predictions,
+        labels=[0, 1],
+        target_names=[
+            "Needs Improvement",
+            "Good Quality"
+        ],
         zero_division=0
     )
 
-    print("\nAccuracy:", round(accuracy, 3))
-    print("\nClassification report:\n", report)
+    print("\nClassification Report:")
+    print(report)
+
+    # ---------------------------------
+    # SAVE TRAINED MODEL
+    # ---------------------------------
 
     joblib.dump(model, MODEL_FILE)
-    print(f"\nSaved {MODEL_FILE} and {DATA_FILE}")
+
+    print("\nModel successfully saved!")
+    print("Dataset:", DATA_FILE)
+    print("Model:", MODEL_FILE)
+
     return model, df, accuracy, report
 
+
+# ---------------------------------
+# MAIN PROGRAM
+# ---------------------------------
+
 if __name__ == "__main__":
+
     train_and_save()
